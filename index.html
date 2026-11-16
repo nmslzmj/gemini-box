@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gemini 小盒子</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: #0f1417; color: #e6edf0;
+    font: 15px/1.65 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    display: flex; flex-direction: column;
+  }
+  header {
+    padding: 12px 18px; border-bottom: 1px solid #1e2a30;
+    display: flex; align-items: center; gap: 10px;
+    font-size: 14px; color: #8fa6b0; flex: 0 0 auto;
+  }
+  header .dot { width: 8px; height: 8px; border-radius: 50%; background: #4db6ac; }
+  header b { color: #e6edf0; font-weight: 600; }
+  header span { margin-left: auto; }
+  #log { flex: 1 1 auto; overflow-y: auto; padding: 20px 18px; }
+  #hint { color: #5c7079; text-align: center; margin-top: 18vh; font-size: 14px; }
+  .msg { display: flex; margin: 0 0 14px; }
+  .msg.user { justify-content: flex-end; }
+  .bubble {
+    max-width: min(680px, 82%); padding: 10px 14px; border-radius: 12px;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .msg.user .bubble { background: #1f6b64; color: #eafcf9; border-bottom-right-radius: 4px; }
+  .msg.model .bubble { background: #171f24; border: 1px solid #223036; border-bottom-left-radius: 4px; }
+  .msg.err .bubble { background: #3a1a1c; border: 1px solid #6b2226; color: #ffb4b4; }
+  form {
+    flex: 0 0 auto; display: flex; gap: 10px; padding: 12px 18px 16px;
+    border-top: 1px solid #1e2a30; background: #0c1114;
+  }
+  textarea {
+    flex: 1; resize: none; height: 52px; max-height: 200px;
+    background: #131a1e; color: #e6edf0; border: 1px solid #223036;
+    border-radius: 10px; padding: 10px 12px; font: inherit; outline: none;
+  }
+  textarea:focus { border-color: #2d7d74; }
+  button {
+    width: 84px; border: 0; border-radius: 10px; background: #1f6b64; color: #eafcf9;
+    font: inherit; font-weight: 600; cursor: pointer;
+  }
+  button:disabled { opacity: .45; cursor: default; }
+  button:hover:not(:disabled) { background: #248079; }
+</style>
+</head>
+<body>
+<header>
+  <i class="dot"></i><b>Gemini 小盒子</b>
+  <span>gemini-2.5-flash</span>
+</header>
+<main id="log"><div id="hint">在下面输入，回车发送</div></main>
+<form id="f">
+  <textarea id="q" placeholder="问点什么…（Enter 发送，Shift+Enter 换行）"></textarea>
+  <button id="send" type="submit">发送</button>
+</form>
+<script>
+(function () {
+  var log = document.getElementById('log');
+  var q = document.getElementById('q');
+  var f = document.getElementById('f');
+  var btn = document.getElementById('send');
+  var hist = [];
+  var busy = false;
+
+  function scroll() { log.scrollTop = log.scrollHeight; }
+
+  function add(role, text) {
+    var h = document.getElementById('hint');
+    if (h) h.remove();
+    var w = document.createElement('div');
+    w.className = 'msg ' + role;
+    var b = document.createElement('div');
+    b.className = 'bubble';
+    b.textContent = text;
+    w.appendChild(b);
+    log.appendChild(w);
+    scroll();
+    return b;
+  }
+
+  function code() {
+    var c = localStorage.getItem('gk') || '';
+    if (!c) {
+      c = (window.prompt('访问口令（你在 Vercel 里设的那串）：') || '').trim();
+      if (c) localStorage.setItem('gk', c);
+    }
+    return c;
+  }
+
+  async function send() {
+    busy = true; btn.disabled = true;
+    var live = add('model', '…');
+    try {
+      var r = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-access-code': code() },
+        body: JSON.stringify({ messages: hist })
+      });
+      var d = await r.json();
+      if (!r.ok) {
+        live.parentElement.className = 'msg err';
+        live.textContent = d.error || ('HTTP ' + r.status);
+        if (r.status === 401) localStorage.removeItem('gk');
+      } else {
+        live.textContent = d.text;
+        hist.push({ role: 'model', text: d.text });
+      }
+    } catch (e) {
+      live.parentElement.className = 'msg err';
+      live.textContent = '请求失败：' + e.message;
+    }
+    scroll();
+    busy = false; btn.disabled = false; q.focus();
+  }
+
+  f.addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    if (busy) return;
+    var t = q.value.trim();
+    if (!t) return;
+    q.value = '';
+    add('user', t);
+    hist.push({ role: 'user', text: t });
+    if (hist.length > 24) hist = hist.slice(-24);
+    send();
+  });
+
+  q.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter' && !ev.shiftKey) {
+      ev.preventDefault();
+      f.dispatchEvent(new Event('submit'));
+    }
+  });
+
+  q.focus();
+})();
+</script>
+</body>
+</html>
