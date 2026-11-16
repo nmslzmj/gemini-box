@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>API Key 测试器</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0 0 40px;
+    background: #0f1417; color: #e6edf0;
+    font: 15px/1.65 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  header {
+    padding: 14px 18px; border-bottom: 1px solid #1e2a30;
+    display: flex; align-items: center; gap: 10px; font-size: 14px; color: #8fa6b0;
+  }
+  header .dot { width: 8px; height: 8px; border-radius: 50%; background: #4db6ac; }
+  header b { color: #e6edf0; font-weight: 600; }
+  .wrap { max-width: 820px; margin: 0 auto; padding: 22px 18px 0; }
+  label { display: block; margin: 18px 0 6px; font-size: 13px; color: #8fa6b0; }
+  input, textarea {
+    width: 100%; background: #131a1e; color: #e6edf0; border: 1px solid #223036;
+    border-radius: 10px; padding: 10px 12px; font: inherit; outline: none;
+  }
+  input:focus, textarea:focus { border-color: #2d7d74; }
+  textarea { height: 110px; resize: vertical; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+  .row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+  .row > div { flex: 1 1 220px; }
+  button {
+    border: 0; border-radius: 10px; background: #1f6b64; color: #eafcf9;
+    font: inherit; font-weight: 600; cursor: pointer; padding: 11px 22px;
+  }
+  button:hover:not(:disabled) { background: #248079; }
+  button:disabled { opacity: .45; cursor: default; }
+  .hint { font-size: 12.5px; color: #5c7079; margin-top: 6px; }
+  #out { margin-top: 24px; }
+  .card {
+    background: #171f24; border: 1px solid #223036; border-radius: 12px;
+    padding: 12px 14px; margin-bottom: 10px;
+  }
+  .card.ok { border-color: #26594f; }
+  .card.bad { border-color: #5c2429; }
+  .card .top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .card code { font-family: ui-monospace, Consolas, monospace; font-size: 13px; color: #9fb6c0; }
+  .tag {
+    font-size: 12px; padding: 2px 9px; border-radius: 999px; font-weight: 600;
+  }
+  .tag.ok { background: #1f4a44; color: #7ee0d2; }
+  .tag.bad { background: #4a1f23; color: #ffb4b4; }
+  .tag.wait { background: #2a3238; color: #9fb6c0; }
+  .meta { font-size: 12.5px; color: #6f8790; margin-top: 6px; }
+  .detail {
+    font-size: 12px; color: #7d929a; margin-top: 6px; background: #0f1417;
+    border: 1px solid #1e2a30; border-radius: 8px; padding: 8px 10px;
+    white-space: pre-wrap; word-break: break-all; font-family: ui-monospace, Consolas, monospace;
+  }
+  .reply { margin-top: 6px; font-size: 13px; color: #b8cdd4; }
+</style>
+</head>
+<body>
+
+<header>
+  <i class="dot"></i><b>API Key 测试器</b>
+  <span style="margin-left:auto">OpenAI 兼容格式</span>
+</header>
+
+<div class="wrap">
+
+  <label>接口地址（base_url）</label>
+  <input id="base" value="https://odyfree.spinsnow.fun/v1">
+  <div class="hint">填到 /v1 为止，后面会自动接 /models 和 /chat/completions</div>
+
+  <label>Key（一行一个，可以一次填很多个）</label>
+  <textarea id="keys" placeholder="sk-xxxxxxxx&#10;sk-yyyyyyyy&#10;sk-zzzzzzzz"></textarea>
+
+  <div class="row">
+    <div>
+      <label>指定模型（可留空，自动用列表第一个）</label>
+      <input id="model" placeholder="留空即可">
+    </div>
+    <button id="go">开始测试</button>
+  </div>
+
+  <div id="out"></div>
+</div>
+
+<script>
+(function () {
+  var baseEl = document.getElementById('base');
+  var keysEl = document.getElementById('keys');
+  var modelEl = document.getElementById('model');
+  var go = document.getElementById('go');
+  var out = document.getElementById('out');
+
+  function code() {
+    var c = localStorage.getItem('gk') || '';
+    if (!c) {
+      c = (window.prompt('访问口令（你在 Vercel 里设的那串）：') || '').trim();
+      if (c) localStorage.setItem('gk', c);
+    }
+    return c;
+  }
+
+  function mask(k) {
+    if (k.length <= 14) return k.slice(0, 3) + '***';
+    return k.slice(0, 7) + '…' + k.slice(-4);
+  }
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  function makeCard(key) {
+    var card = el('div', 'card');
+    var top = el('div', 'top');
+    top.appendChild(el('code', null, mask(key)));
+    var tag = el('span', 'tag wait', '测试中…');
+    top.appendChild(tag);
+    card.appendChild(top);
+    var meta = el('div', 'meta', '');
+    card.appendChild(meta);
+    out.appendChild(card);
+    return { card: card, tag: tag, meta: meta };
+  }
+
+  async function testOne(base, key, model) {
+    var r = await fetch('/api/test', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-access-code': code() },
+      body: JSON.stringify({ base: base, key: key, model: model })
+    });
+
+    var d = {};
+    try { d = await r.json(); } catch (e) {}
+
+    if (r.status === 401) { localStorage.removeItem('gk'); }
+    if (!r.ok && !d.verdict) {
+      d = { ok: false, verdict: d.error || ('HTTP ' + r.status) };
+    }
+    return d;
+  }
+
+  async function run() {
+    out.innerHTML = '';
+    var base = baseEl.value.trim().replace(/\/+$/, '');
+    var model = modelEl.value.trim();
+    var keys = keysEl.value.split(/[\n,]+/).map(function (s) { return s.trim(); })
+      .filter(Boolean)
+      .filter(function (v, i, a) { return a.indexOf(v) === i; });
+
+    if (!base) { alert('接口地址没填'); return; }
+    if (keys.length === 0) { alert('key 没填'); return; }
+
+    go.disabled = true;
+    var okCount = 0;
+
+    for (var i = 0; i < keys.length; i++) {
+      var ui = makeCard(keys[i]);
+      var d;
+      try {
+        d = await testOne(base, keys[i], model);
+      } catch (e) {
+        d = { ok: false, verdict: '请求失败：' + e.message };
+      }
+
+      ui.tag.className = 'tag ' + (d.ok ? 'ok' : 'bad');
+      ui.tag.textContent = d.ok ? '✅ 可用' : '❌ 不可用';
+      if (d.ok) {
+        ui.card.className = 'card ok';
+        okCount++;
+      } else {
+        ui.card.className = 'card bad';
+      }
+
+      var bits = [];
+      if (d.ok) {
+        bits.push('模型 ' + (d.modelCount || 0) + ' 个');
+        bits.push('耗时 ' + d.latencyMs + 'ms');
+      } else {
+        bits.push(d.verdict || '未知原因');
+      }
+      ui.meta.textContent = bits.join(' · ');
+
+      if (d.reply) {
+        ui.card.appendChild(el('div', 'reply', '回复：' + d.reply));
+      }
+
+      var badDetail =
+        (d.chatProblem && d.chatProblem.detail) ||
+        (d.modelsProblem && d.modelsProblem.detail) || '';
+      if (!d.ok && badDetail) {
+        ui.card.appendChild(el('div', 'detail', badDetail));
+      }
+
+      if (d.ok && d.models && d.models.length) {
+        ui.card.appendChild(
+          el('div', 'detail', '可用模型：' + d.models.slice(0, 12).join(', ') +
+            (d.models.length > 12 ? ' …共 ' + d.models.length + ' 个' : ''))
+        );
+      }
+    }
+
+    go.disabled = false;
+    var sum = el('div', 'meta',
+      '共 ' + keys.length + ' 个，可用 ' + okCount + ' 个，失败 ' + (keys.length - okCount) + ' 个');
+    sum.style.marginTop = '14px';
+    out.appendChild(sum);
+  }
+
+  go.addEventListener('click', run);
+})();
+</script>
+</body>
+</html>
